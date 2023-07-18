@@ -1,0 +1,185 @@
+#!/usr/bin/env node
+import { getDiff } from './git'
+import { Configuration, OpenAIApi } from 'openai'
+import dotenv from 'dotenv'
+import path from 'path'
+
+dotenv.config({
+  path: path.join(process.argv[1], '..', '..', '.env')
+})
+
+type CommitType =
+  | 'feat'
+  | 'fix'
+  | 'docs'
+  | 'style'
+  | 'refactor'
+  | 'test'
+  | 'chore'
+
+const createSystemMessage = (
+  type: CommitType,
+  trackerID: string | undefined = undefined
+) => `
+You are commit-assistant. You create commit messages from diffs.
+You will be provided with a diff, and you will need to create a commit message.
+the commit is of type: ${type}
+issue tracker ID: ${trackerID}
+The diff will be provided in the first prompt. you will reply "ready".
+On the second user prompt, you will be asked to check the context of the diff.
+Then, you will be asked to create a commit, by calling the function "commit".
+If the diff does not contains enough context lines, You can request a new diff by calling "getDiff" with the number of context lines you need.
+`
+const userMessage1 = `
+The first step would be to the context of each change.
+Review the diff. Ensure that for each change in code, the related function or class definition is included.
+Ignore style changes and whitespace changes.
+Ignore semantically unimportant changes.
+For each change, Answer the following questions:
+- Is the change in code, configuration, or documentation?
+- If it's in the code, Is the change in a function or class?
+- What is the signature of the function or class? If You can't determine the signature, request diff with more context by calling "getDiff".
+- What is the purpose of this change?
+- What is the scope of this change?
+- What is the impact of this change?
+- What is the motivation for this change?
+- Is the chage significant enough to mention in the commit message?
+  Here are some example changes that are NOT significant, and are NOT to be mentioned in the commit message:
+  - changing the name of a variable, function or class
+  - typo fixes
+  - formatting changes
+  - removing or adding whitespace
+  - changes to .gitignore, linting files, lock files, etc.
+  - minor version bumps of dependencies
+If you are unable to answer these questions, request diff with more context by calling "getDiff".
+Then answer the following questions, about the whole diff:
+- Is this a single change, or multiple changes?
+- Can it be summarized in a single line message, Or is message body needed?
+`
+
+const userMessage2 = `
+The second step would be to create a commit message.
+Commit message template:
+<type>(<scope>): <subject>
+<BLANK LINE>
+<body>
+
+Where:
+scope: can be empty (eg. if the change is a global or difficult to assign to a single component)
+subject: start with verb (such as 'change'), 50-character line
+body: optional, 72-character wrapped. use '-' for bullet points
+`
+
+async function main (
+  type: CommitType,
+  issueTracker: string | undefined = undefined
+) {
+  const configuration = new Configuration({
+    apiKey: process.env.OPENAI_API_KEY
+  })
+  const openai = new OpenAIApi(configuration)
+  let diff = getDiff()
+
+  let contextValidation
+  do {
+    contextValidation = await openai.createChatCompletion({
+      model: 'gpt-3.5-turbo-16k-0613',
+      messages: [
+        { role: 'system', content: createSystemMessage(type, issueTracker) },
+        { role: 'user', content: diff },
+        { role: 'system', content: 'ready' },
+        { role: 'user', content: userMessage1 }
+      ],
+      functions: [
+        {
+          name: 'getDiff',
+          description: 'get the diff of the current branch',
+          parameters: {
+            type: 'object',
+            properties: {
+              contextLines: {
+                type: 'number',
+                description: 'number of context lines to include in the diff'
+              }
+            },
+            required: ['contextLines']
+          }
+        }
+      ]
+    })
+
+    if (contextValidation.data.choices[0].message?.function_call)
+      diff = getDiff(
+        JSON.parse(
+          contextValidation.data.choices[0].message.function_call.arguments!
+        ).contextLines
+      )
+  } while (contextValidation.data.choices[0].message?.function_call)
+
+  const contextValidationResponse =
+    contextValidation.data.choices[0].message?.content
+  if (!contextValidationResponse) {
+    console.error('context validation failed')
+    return
+  }
+
+  if (process.argv.includes('--debug'))
+    console.debug('context validation: ', contextValidationResponse)
+  if (contextValidationResponse.trim() === 'more context needed') {
+    console.error('more context needed')
+    return
+  }
+
+  const completion = await openai.createChatCompletion({
+    model: 'gpt-3.5-turbo-16k-0613',
+    messages: [
+      { role: 'system', content: createSystemMessage(type, issueTracker) },
+      { role: 'user', content: diff },
+      { role: 'system', content: 'ready' },
+      { role: 'user', content: userMessage1 },
+      { role: 'system', content: contextValidationResponse },
+      { role: 'user', content: userMessage2 }
+    ],
+    functions: [
+      {
+        name: 'commit',
+        description: 'create a commit',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              description: 'type of commit'
+            },
+            scope: {
+              type: 'string',
+              description: 'scope of commit'
+            },
+            subject: {
+              type: 'string',
+              description: 'subject of commit'
+            },
+            body: {
+              type: 'string',
+              description: 'body of commit'
+            }
+          },
+          required: ['type', 'subject']
+        }
+      }
+    ]
+  })
+  const commit = JSON.parse(
+    completion.data.choices[0].message?.function_call?.arguments!
+  )
+
+  process.stdout.write(
+    `
+${commit.type}(${commit.scope}): ${commit.subject}
+
+${commit.body ?? ''}
+`
+  )
+}
+
+main(process.argv[2] as CommitType, process.argv[3])
