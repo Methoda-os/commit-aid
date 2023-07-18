@@ -1,8 +1,8 @@
 import { execSync } from 'child_process'
 
-export function getDiff (ctxLines: number = 3) {
+export function getDiff () {
   const diff = execSync(
-    `git diff --staged --raw -U${ctxLines} -- ":!package-lock.json"`
+    `git diff --staged --raw -U5 -- ":!package-lock.json"`
   ).toString()
   if (!diff) {
     throw new Error('No Staged files')

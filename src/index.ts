@@ -30,7 +30,6 @@ the commit is of type: ${config.type}
 The diff will be provided in the first prompt. you will reply "ready".
 On the second user prompt, you will be asked to check the context of the diff.
 Then, you will be asked to create a commit, by calling the function "commit".
-If the diff does not contains enough context lines, You can request a new diff by calling "getDiff" with the number of context lines you need.
 `
 const createContextVerification = (config: CommitConfig) => `
 The first step would be to the context of each change.
@@ -40,7 +39,7 @@ Ignore semantically unimportant changes.
 For each change, Answer the following questions:
 - Is the change in code, configuration, or documentation?
 - If it's in the code, Is the change in a function or class?
-- What is the signature of the function or class? If You can't determine the signature, request diff with more context by calling "getDiff".
+- What is the signature of the function or class?
 - What is the purpose of this change?
 - What is the scope of this change?
 - What is the impact of this change?
@@ -53,7 +52,6 @@ For each change, Answer the following questions:
   - removing or adding whitespace
   - changes to .gitignore, linting files, lock files, etc.
   - minor version bumps of dependencies
-If you are unable to answer these questions, request diff with more context by calling "getDiff".
 Then answer the following questions, about the whole diff:
 - Is this a single change, or multiple changes?
 - Can it be summarized in a single line message, Or is message body needed?
@@ -73,6 +71,7 @@ subject: start with verb (such as 'change'), 50-character line
 body: ${
   config.forceBody ? 'required.' : 'optional.'
 }, 72-character wrapped. use '-' for bullet points
+Call the "commit" function with the "type", "scope", "subject" and "body" parameters.
 `
 
 async function main (config: CommitConfig) {
@@ -80,50 +79,17 @@ async function main (config: CommitConfig) {
     apiKey: process.env.OPENAI_API_KEY
   })
   const openai = new OpenAIApi(configuration)
-  let diff = getDiff()
+  const diff = getDiff()
 
-  let contextValidation
-  do {
-    contextValidation = await openai.createChatCompletion({
-      model: 'gpt-3.5-turbo-16k-0613',
-      messages: [
-        { role: 'system', content: createSystemMessage(config) },
-        { role: 'user', content: diff },
-        { role: 'system', content: 'ready' },
-        { role: 'user', content: createContextVerification(config) }
-      ],
-      functions: [
-        {
-          name: 'getDiff',
-          description: 'get the diff of the current branch',
-          parameters: {
-            type: 'object',
-            properties: {
-              contextLines: {
-                type: 'number',
-                description: 'number of context lines to include in the diff'
-              }
-            },
-            required: ['contextLines']
-          }
-        }
-      ]
-    })
-
-    if (contextValidation.data.choices[0].message?.function_call) {
-      if (process.argv.includes('--debug'))
-        console.debug(
-          'context validation: ',
-          contextValidation.data.choices[0].message.function_call
-        )
-      diff = getDiff(
-        JSON.parse(
-          contextValidation.data.choices[0].message.function_call.arguments!
-        ).contextLines
-      )
-      if (process.argv.includes('--debug')) console.debug('new diff: ', diff)
-    }
-  } while (contextValidation.data.choices[0].message?.function_call)
+  const contextValidation = await openai.createChatCompletion({
+    model: 'gpt-3.5-turbo-16k-0613',
+    messages: [
+      { role: 'system', content: createSystemMessage(config) },
+      { role: 'user', content: diff },
+      { role: 'system', content: 'ready' },
+      { role: 'user', content: createContextVerification(config) }
+    ]
+  })
 
   const contextValidationResponse =
     contextValidation.data.choices[0].message?.content
@@ -137,6 +103,7 @@ async function main (config: CommitConfig) {
 
   const completion = await openai.createChatCompletion({
     model: 'gpt-3.5-turbo-16k-0613',
+    temperature: 0.1,
     messages: [
       { role: 'system', content: createSystemMessage(config) },
       { role: 'user', content: diff },
@@ -178,6 +145,8 @@ async function main (config: CommitConfig) {
       }
     ]
   })
+  if (process.argv.includes('--debug'))
+    console.debug('completion: ', completion.data.choices[0].message)
   const commit = JSON.parse(
     completion.data.choices[0].message?.function_call?.arguments!
   )
