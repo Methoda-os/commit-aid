@@ -11,3 +11,5 @@ export type CommitType =
   | 'refactor'
   | 'test'
   | 'chore'
+
+export type PromptGenerator = (config: CommitConfig) => string
