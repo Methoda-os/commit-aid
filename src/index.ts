@@ -36,7 +36,7 @@ The first step would be to the context of each change.
 Review the diff. Ensure that for each change in code, the related function or class definition is included.
 Ignore style changes and whitespace changes.
 Ignore semantically unimportant changes.
-For each change, Answer the following questions:
+For each change, try to answer the following questions:
 - Is the change in code, configuration, or documentation?
 - If it's in the code, Is the change in a function or class?
 - What is the signature of the function or class?
@@ -44,14 +44,6 @@ For each change, Answer the following questions:
 - What is the scope of this change?
 - What is the impact of this change?
 - What is the motivation for this change?
-- Is the chage significant enough to mention in the commit message?
-  Here are some example changes that are NOT significant, and are NOT to be mentioned in the commit message:
-  - changing the name of a variable, function or class
-  - typo fixes
-  - formatting changes
-  - removing or adding whitespace
-  - changes to .gitignore, linting files, lock files, etc.
-  - minor version bumps of dependencies
 Then answer the following questions, about the whole diff:
 - Is this a single change, or multiple changes?
 - Can it be summarized in a single line message, Or is message body needed?
@@ -69,7 +61,9 @@ type: ${config.type}
 scope: can be empty (eg. if the change is a global or difficult to assign to a single component)
 subject: start with verb (such as 'change'), 50-character line
 body: ${
-  config.forceBody ? 'required.' : 'optional.'
+  config.forceBody
+    ? 'required.'
+    : 'optional. Add body if you answered that body is needed in previous prompt.'
 }, 72-character wrapped. use '-' for bullet points
 Call the "commit" function with the "type", "scope", "subject" and "body" parameters.
 `
@@ -79,7 +73,15 @@ async function main (config: CommitConfig) {
     apiKey: process.env.OPENAI_API_KEY
   })
   const openai = new OpenAIApi(configuration)
-  const diff = getDiff()
+  let diff = ''
+  try {
+    diff = getDiff()
+  } catch (e: any) {
+    if (e.message === 'No Staged files') {
+      console.error('No Staged files. Please stage files and try again.')
+      return
+    }
+  }
 
   const contextValidation = await openai.createChatCompletion({
     model: 'gpt-3.5-turbo-16k-0613',
