@@ -4,24 +4,13 @@ import { Configuration, OpenAIApi } from 'openai'
 import dotenv from 'dotenv'
 import path from 'path'
 import os from 'os'
+import { CommitConfig, CommitType } from './lib/modes'
+import readline from 'readline'
+import fs from 'fs'
 
 dotenv.config({
   path: path.join(os.homedir(), '.commit-aid.env')
 })
-
-type CommitType =
-  | 'feat'
-  | 'fix'
-  | 'docs'
-  | 'style'
-  | 'refactor'
-  | 'test'
-  | 'chore'
-
-type CommitConfig = {
-  type: CommitType
-  forceBody?: boolean
-}
 
 const createSystemMessage = (config: CommitConfig) => `
 You are commit-assistant. You create commit messages from diffs.
@@ -69,6 +58,21 @@ Call the "commit" function with the "type", "scope", "subject" and "body" parame
 `
 
 async function main (config: CommitConfig) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('OPENAI_API_KEY is not set')
+    process.stdout.write('set OPENAI_API_KEY:')
+    const rl = readline.createInterface(process.stdin, process.stdout)
+    rl.on('line', line => {
+      process.env.OPENAI_API_KEY = line
+      rl.close()
+      fs.writeFileSync(
+        path.join(os.homedir(), '.commit-aid.env'),
+        `OPENAI_API_KEY=${process.env.OPENAI_API_KEY}`
+      )
+    })
+    return
+  }
+
   const configuration = new Configuration({
     apiKey: process.env.OPENAI_API_KEY
   })
@@ -104,8 +108,8 @@ async function main (config: CommitConfig) {
     console.debug('context validation: ', contextValidationResponse)
 
   const completion = await openai.createChatCompletion({
-    model: 'gpt-3.5-turbo-16k-0613',
-    temperature: 0.1,
+    model: 'gpt-4-0613',
+    temperature: 0.3,
     messages: [
       { role: 'system', content: createSystemMessage(config) },
       { role: 'user', content: diff },
