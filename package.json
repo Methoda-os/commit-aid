@@ -4,7 +4,7 @@
     "type": "git",
     "url": "https://github.com/Methoda-os/commit-aid"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "licenses": [
     {
       "type": "MIT",
@@ -15,7 +15,7 @@
   "module": "commonjs",
   "main": "index.js",
   "bin": {
-    "commit-aid": "./dist/index.js"
+    "commit-air": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
